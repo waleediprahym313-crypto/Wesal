@@ -1,5 +1,6 @@
 package com.wesal.app
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,25 +22,59 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 private val Ink = Color(0xFF101827)
 private val Teal = Color(0xFF20C6B7)
 private val SurfaceDark = Color(0xFF1B2638)
 private val Muted = Color(0xFF9AA8BA)
+private const val SUPABASE_URL = "https://volcbanvmdyxyuylrnsj.supabase.co"
+private const val SUPABASE_KEY = "sb_publishable_4eDhykHTkUYpljgWTtKg7w_V42gcG4x"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { WesalApp() }
+        setContent { WesalApp(this) }
     }
 }
 
+private fun authRequest(username: String, password: String, mode: String): JSONObject {
+    val connection = (URL("$SUPABASE_URL/functions/v1/wesal-auth").openConnection() as HttpURLConnection)
+    connection.requestMethod = "POST"
+    connection.connectTimeout = 15000
+    connection.readTimeout = 20000
+    connection.doOutput = true
+    connection.setRequestProperty("Content-Type", "application/json")
+    connection.setRequestProperty("apikey", SUPABASE_KEY)
+    connection.setRequestProperty("Authorization", "Bearer $SUPABASE_KEY")
+    val payload = JSONObject().put("username", username).put("password", password).put("mode", mode)
+    connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+    val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+    val response = stream.bufferedReader().use { it.readText() }
+    connection.disconnect()
+    return JSONObject(response)
+}
+
 @Composable
-fun WesalApp() {
+fun WesalApp(context: Context) {
     var signedIn by remember { mutableStateOf(false) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var isSignup by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
+    val prefs = remember { context.getSharedPreferences("wesal_session", Context.MODE_PRIVATE) }
+
+    LaunchedEffect(Unit) {
+        if (!prefs.getString("access_token", null).isNullOrBlank()) {
+            username = prefs.getString("username", "") ?: ""
+            signedIn = true
+        }
+    }
+
     MaterialTheme(colorScheme = darkColorScheme(primary = Teal, background = Ink, surface = SurfaceDark)) {
         Surface(Modifier.fillMaxSize(), color = Ink) {
             if (!signedIn) {
@@ -51,33 +86,75 @@ fun WesalApp() {
                     Text("WESAL", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                     Text("وصال • تواصل يجمعنا", color = Teal, fontSize = 16.sp)
                     Spacer(Modifier.height(34.dp))
-                    Text("مرحباً بك في وصال", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                    Text("أنشئ حسابك أو سجّل الدخول", color = Muted)
+                    Text(if (isSignup) "أنشئ حساباً جديداً" else "مرحباً بك في وصال", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    Text("استخدم اسم المستخدم وكلمة المرور فقط", color = Muted)
                     Spacer(Modifier.height(24.dp))
-                    WesalField(username, { username = it }, "اسم المستخدم")
+                    WesalField(username, { username = it; error = "" }, "اسم المستخدم")
                     Spacer(Modifier.height(12.dp))
-                    WesalField(password, { password = it }, "كلمة المرور", true)
-                    Spacer(Modifier.height(20.dp))
-                    Button(onClick = { if (username.isNotBlank() && password.isNotBlank()) signedIn = true }, modifier = Modifier.fillMaxWidth().height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal), shape = RoundedCornerShape(16.dp)) {
-                        Text("دخول تجريبي", color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    WesalField(password, { password = it; error = "" }, "كلمة المرور (8 أحرف على الأقل)", true)
+                    if (error.isNotBlank()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(error, color = Color(0xFFFF8A80), fontSize = 13.sp)
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Text("نسخة تجريبية: لا يتم إنشاء حساب حقيقي بعد", color = Muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(20.dp))
+                    Button(
+                        onClick = {
+                            if (username.isBlank() || password.length < 8) {
+                                error = "أدخل اسم مستخدم صحيحاً وكلمة مرور من 8 أحرف على الأقل"
+                            } else {
+                                busy = true
+                                error = ""
+                                Thread {
+                                    try {
+                                        val result = authRequest(username.trim(), password, if (isSignup) "signup" else "login")
+                                        if (result.has("error")) throw IllegalStateException(result.optString("error"))
+                                        prefs.edit()
+                                            .putString("access_token", result.getString("access_token"))
+                                            .putString("refresh_token", result.getString("refresh_token"))
+                                            .putString("user_id", result.getString("user_id"))
+                                            .putString("username", result.getString("username"))
+                                            .apply()
+                                        (context as? ComponentActivity)?.runOnUiThread {
+                                            busy = false
+                                            signedIn = true
+                                            username = result.optString("username", username)
+                                        }
+                                    } catch (e: Exception) {
+                                        (context as? ComponentActivity)?.runOnUiThread {
+                                            busy = false
+                                            error = e.message ?: "تعذر الاتصال. تحقق من الإنترنت وحاول مجدداً"
+                                        }
+                                    }
+                                }.start()
+                            }
+                        },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Ink, strokeWidth = 2.dp)
+                        else Text(if (isSignup) "إنشاء الحساب" else "تسجيل الدخول", color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    }
+                    TextButton(onClick = { isSignup = !isSignup; error = "" }) {
+                        Text(if (isSignup) "لديك حساب؟ سجّل الدخول" else "ليس لديك حساب؟ أنشئ حساباً", color = Teal)
+                    }
+                    Text("لا نطلب بريداً إلكترونياً أو رقم هاتف", color = Muted, fontSize = 12.sp)
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("WESAL", color = Teal, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.weight(1f))
-                        IconButton(onClick = {}) { Icon(Icons.Default.FavoriteBorder, null, tint = Color.White) }
-                        IconButton(onClick = {}) { Icon(Icons.Default.Send, null, tint = Color.White) }
+                        Text("@$username", color = Muted, fontSize = 13.sp)
+                        IconButton(onClick = { prefs.edit().clear().apply(); signedIn = false; password = "" }) { Icon(Icons.Default.Logout, null, tint = Color.White) }
                     }
                     when (selected) {
                         0 -> FeedScreen()
-                        1 -> CenterPage("استكشاف", "ابحث عن أشخاص واهتمامات جديدة")
-                        2 -> CenterPage("إنشاء منشور", "مشاركة الصور والمنشورات ستتوفر بعد ربط الخادم")
-                        3 -> CenterPage("النشاط", "ستظهر هنا الإشعارات والتفاعلات")
-                        else -> CenterPage("الرسائل", "المراسلة الحقيقية ستتوفر بعد ربط الخادم")
+                        1 -> CenterPage("استكشاف", "سيتم ربط البحث عن المستخدمين في المرحلة التالية")
+                        2 -> CenterPage("إنشاء منشور", "سيتم تفعيل رفع الصور والمنشورات في المرحلة التالية")
+                        3 -> CenterPage("النشاط", "سيتم تفعيل الإشعارات في المرحلة التالية")
+                        else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
                     }
                     Spacer(Modifier.weight(1f))
                     NavigationBar(containerColor = SurfaceDark) {
@@ -106,40 +183,28 @@ fun WesalField(value: String, onValue: (String) -> Unit, hint: String, secret: B
 
 @Composable
 fun FeedScreen() {
-    val names = listOf("ليث الرياضي", "سارة", "أحمد")
-    val captions = listOf("بداية يوم جميل! أهلاً بأصدقائي في وصال ✨", "لحظات تستحق أن نتشاركها 💚", "مرحباً بالجميع في مجتمع وصال")
+    val names = listOf("مجتمع وصال", "شارك لحظاتك", "تواصل مع أصدقائك")
+    val captions = listOf("أهلاً بك في وصال! ابدأ بالتواصل مع الآخرين ✨", "مساحتك لمشاركة الصور والأفكار 💚", "تابع الأشخاص الذين تحب محتواهم")
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Text("مرحباً بك 👋", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("آخر المنشورات من مجتمعك", color = Muted)
+            Text("مجتمع وصال", color = Muted)
             Spacer(Modifier.height(8.dp))
         }
         items(names.indices.toList()) { i ->
             Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(42.dp).background(Teal, CircleShape), contentAlignment = Alignment.Center) { Text(names[i].take(1), color = Ink, fontWeight = FontWeight.Bold) }
+                        Box(Modifier.size(42.dp).background(Teal, CircleShape), contentAlignment = Alignment.Center) { Text("و", color = Ink, fontWeight = FontWeight.Bold) }
                         Spacer(Modifier.width(10.dp))
-                        Column { Text(names[i], color = Color.White, fontWeight = FontWeight.Bold); Text("منذ قليل • نسخة تجريبية", color = Muted, fontSize = 11.sp) }
-                        Spacer(Modifier.weight(1f))
-                        Icon(Icons.Default.MoreHoriz, null, tint = Muted)
+                        Column { Text(names[i], color = Color.White, fontWeight = FontWeight.Bold); Text("WESAL", color = Muted, fontSize = 11.sp) }
                     }
                     Spacer(Modifier.height(14.dp))
-                    Box(Modifier.fillMaxWidth().height(150.dp).background(Color(0xFF26384B), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxWidth().height(120.dp).background(Color(0xFF26384B), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Image, null, tint = Teal, modifier = Modifier.size(48.dp))
                     }
                     Spacer(Modifier.height(12.dp))
                     Text(captions[i], color = Color.White, fontSize = 15.sp)
-                    Spacer(Modifier.height(10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.FavoriteBorder, null, tint = Teal)
-                        Spacer(Modifier.width(6.dp))
-                        Text("إعجاب", color = Muted)
-                        Spacer(Modifier.width(22.dp))
-                        Icon(Icons.Default.ModeComment, null, tint = Muted)
-                        Spacer(Modifier.width(6.dp))
-                        Text("تعليق", color = Muted)
-                    }
                 }
             }
         }
