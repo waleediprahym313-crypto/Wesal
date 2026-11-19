@@ -158,7 +158,7 @@ fun WesalApp(context: Context) {
                         0 -> FeedScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         1 -> ExploreScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         2 -> CreatePostScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
-                        3 -> CenterPage("النشاط", "سيتم تفعيل الإشعارات في المرحلة التالية")
+                        3 -> NotificationsScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         5 -> ProfileScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "", username)
                         else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
                     }
@@ -300,6 +300,43 @@ fun ExploreScreen(token: String, userId: String) {
                                 } catch (_: Exception) {}
                             }.start()
                         }) { Text(if(isFollowing) "إلغاء المتابعة" else "متابعة",color=Teal) }
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+fun NotificationsScreen(token: String, userId: String) {
+    var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf("") }
+    LaunchedEffect(token, userId) {
+        try {
+            val arr = org.json.JSONArray(supabaseRest("notifications?select=id,actor_id,kind,message,is_read,created_at&recipient_id=eq.$userId&order=created_at.desc&limit=50", token))
+            items = (0 until arr.length()).map { arr.getJSONObject(it) }
+        } catch (_: Exception) { error = "تعذر تحميل الإشعارات" }
+        loading = false
+    }
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("الإشعارات", color=Color.White, fontSize=24.sp, fontWeight=FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        if (loading) CircularProgressIndicator(color=Teal)
+        if (error.isNotBlank()) Text(error,color=Color(0xFFFF8A80))
+        if (!loading && items.isEmpty() && error.isBlank()) Text("لا توجد إشعارات حتى الآن",color=Muted,modifier=Modifier.padding(12.dp))
+        LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            items(items,key={it.optString("id")}) { n ->
+                Card(colors=CardDefaults.cardColors(containerColor=SurfaceDark)) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp),verticalAlignment=Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).background(if(n.optBoolean("is_read")) Color(0xFF344155) else Teal,CircleShape),contentAlignment=Alignment.Center){Icon(Icons.Default.Notifications,null,tint=if(n.optBoolean("is_read")) Color.White else Ink)}
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(n.optString("message").ifBlank { when(n.optString("kind")){"follow"->"بدأ بمتابعتك";"like"->"أعجب بمنشورك";"comment"->"علّق على منشورك";"verification"->"تحديث طلب التوثيق";else->"إشعار جديد"} },color=Color.White)
+                            Text("@${n.optString("actor_id").take(8)} • ${n.optString("kind")}",color=Muted,fontSize=11.sp)
+                        }
+                        if(!n.optBoolean("is_read")) TextButton(onClick={
+                            Thread { try { supabaseRest("notifications?id=eq.${n.optString("id")}&recipient_id=eq.$userId",token,"PATCH",JSONObject().put("is_read",true)); items=items.map{if(it.optString("id")==n.optString("id")) JSONObject(it.toString()).put("is_read",true) else it} } catch(_:Exception){} }.start()
+                        }) { Text("قراءة",color=Teal) }
                     }
                 }
             }
