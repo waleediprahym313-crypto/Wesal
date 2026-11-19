@@ -222,7 +222,13 @@ fun ProfileScreen(token: String, userId: String, username: String) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var display by remember { mutableStateOf(username) }
     var bio by remember { mutableStateOf("") }
+    var avatarUrl by remember { mutableStateOf("") }
+    var followers by remember { mutableIntStateOf(0) }
+    var following by remember { mutableIntStateOf(0) }
+    var myPosts by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var selectedAvatar by remember { mutableStateOf<Uri?>(null) }
     var saving by remember { mutableStateOf(false) }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> selectedAvatar = uri }
     var status by remember { mutableStateOf("") }
     var verifyOpen by remember { mutableStateOf(false) }
     var verifyName by remember { mutableStateOf("") }
@@ -231,22 +237,35 @@ fun ProfileScreen(token: String, userId: String, username: String) {
 
     LaunchedEffect(userId) {
         try {
-            val arr = org.json.JSONArray(supabaseRest("profiles?select=display_name,bio&id=eq.$userId", token))
+            val arr = org.json.JSONArray(supabaseRest("profiles?select=display_name,bio,avatar_url&id=eq.$userId", token))
             if (arr.length() > 0) {
                 display = arr.getJSONObject(0).optString("display_name", username)
                 bio = arr.getJSONObject(0).optString("bio", "")
+                avatarUrl = arr.getJSONObject(0).optString("avatar_url", "")
             }
+            followers = org.json.JSONArray(supabaseRest("follows?select=follower_id&following_id=eq.$userId", token)).length()
+            following = org.json.JSONArray(supabaseRest("follows?select=following_id&follower_id=eq.$userId", token)).length()
+            val postArr = org.json.JSONArray(supabaseRest("posts?select=id,caption,media_url,created_at&user_id=eq.$userId&order=created_at.desc&limit=50", token))
+            myPosts = (0 until postArr.length()).map { postArr.getJSONObject(it) }
         } catch (_: Exception) { }
     }
 
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(90.dp).background(Teal, CircleShape), contentAlignment = Alignment.Center) {
-            Text("و", fontSize = 42.sp, color = Ink, fontWeight = FontWeight.Bold)
+        Box(Modifier.size(104.dp).background(Teal, CircleShape), contentAlignment = Alignment.Center) {
+            if (selectedAvatar != null) AsyncImage(model = selectedAvatar, contentDescription = "الصورة المختارة", modifier = Modifier.size(104.dp))
+            else if (avatarUrl.isNotBlank()) AsyncImage(model = avatarUrl, contentDescription = "الصورة الشخصية", modifier = Modifier.size(104.dp))
+            else Text("و", fontSize = 42.sp, color = Ink, fontWeight = FontWeight.Bold)
         }
+        TextButton(onClick = { avatarPicker.launch("image/*") }) { Text("تغيير الصورة الشخصية", color = Teal) }
         Spacer(Modifier.height(12.dp))
         Text("@$username", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
         Text("ملفك الشخصي", color = Muted)
-        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("${myPosts.size}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp); Text("منشورات", color = Muted) }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("$followers", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp); Text("متابعون", color = Muted) }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("$following", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp); Text("يتابع", color = Muted) }
+        }
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(value = display, onValueChange = { display = it }, modifier = Modifier.fillMaxWidth(), label = { Text("الاسم الظاهر") }, singleLine = true)
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(value = bio, onValueChange = { bio = it }, modifier = Modifier.fillMaxWidth(), label = { Text("نبذة عنك") }, minLines = 3)
@@ -255,7 +274,10 @@ fun ProfileScreen(token: String, userId: String, username: String) {
             saving = true
             Thread {
                 val result = try {
-                    supabaseRest("profiles?id=eq.$userId", token, "PATCH", JSONObject().put("display_name", display.trim()).put("bio", bio.trim()))
+                    val uploadedAvatar = selectedAvatar?.let { uploadMedia(context, token, userId, it) } ?: avatarUrl
+                    supabaseRest("profiles?id=eq.$userId", token, "PATCH", JSONObject().put("display_name", display.trim()).put("bio", bio.trim()).put("avatar_url", uploadedAvatar))
+                    avatarUrl = uploadedAvatar
+                    selectedAvatar = null
                     "تم حفظ الملف الشخصي"
                 } catch (_: Exception) { "تعذر الحفظ" }
                 (context as? ComponentActivity)?.runOnUiThread { saving = false; status = result }
@@ -267,6 +289,17 @@ fun ProfileScreen(token: String, userId: String, username: String) {
             Text("طلب توثيق الحساب", color = Teal)
         }
         if (status.isNotBlank()) Text(status, color = Teal, modifier = Modifier.padding(top = 10.dp))
+        Text("منشوراتك", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp))
+        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(myPosts, key = { it.optString("id") }) { post ->
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        if (post.optString("caption").isNotBlank()) Text(post.optString("caption"), color = Color.White)
+                        if (post.optString("media_url").isNotBlank()) AsyncImage(model = post.optString("media_url"), contentDescription = "صورة المنشور", modifier = Modifier.fillMaxWidth().height(180.dp))
+                    }
+                }
+            }
+        }
         if (verifyOpen) {
             AlertDialog(
                 onDismissRequest = { verifyOpen = false },
