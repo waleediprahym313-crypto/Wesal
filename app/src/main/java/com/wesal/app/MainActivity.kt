@@ -340,7 +340,7 @@ fun ExploreScreen(token: String, userId: String) {
                                 try {
                                     if (isFollowing) supabaseRest("follows?follower_id=eq.$userId&following_id=eq.$targetId", token, "DELETE")
                                     else supabaseRest("follows", token, "POST", JSONObject().put("follower_id",userId).put("following_id",targetId))
-                                    (contextSafeMainThread { followedIds = if(isFollowing) followedIds-targetId else followedIds+targetId })
+                                    (context as? ComponentActivity)?.runOnUiThread { followedIds = if(isFollowing) followedIds-targetId else followedIds+targetId }
                                 } catch (_: Exception) {}
                             }.start()
                         }) { Text(if(isFollowing) "إلغاء المتابعة" else "متابعة",color=Teal) }
