@@ -222,40 +222,76 @@ fun ProfileScreen(token: String, userId: String, username: String) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var display by remember { mutableStateOf(username) }
     var bio by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var verifyOpen by remember { mutableStateOf(false) }
     var verifyName by remember { mutableStateOf("") }
     var verifyReason by remember { mutableStateOf("") }
     var verifyBusy by remember { mutableStateOf(false) }
+
     LaunchedEffect(userId) {
         try {
-            val arr=org.json.JSONArray(supabaseRest("profiles?select=display_name,bio&id=eq.$userId",token))
-            if(arr.length()>0) { display=arr.getJSONObject(0).optString("display_name",username); bio=arr.getJSONObject(0).optString("bio","") }
-        } catch(_:Exception){}
-        loading=false
+            val arr = org.json.JSONArray(supabaseRest("profiles?select=display_name,bio&id=eq.$userId", token))
+            if (arr.length() > 0) {
+                display = arr.getJSONObject(0).optString("display_name", username)
+                bio = arr.getJSONObject(0).optString("bio", "")
+            }
+        } catch (_: Exception) { }
     }
-    Column(Modifier.fillMaxSize().padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-        Box(Modifier.size(90.dp).background(Teal,CircleShape),contentAlignment=Alignment.Center){Text("و",fontSize=42.sp,color=Ink,fontWeight=FontWeight.Bold)}
+
+    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(90.dp).background(Teal, CircleShape), contentAlignment = Alignment.Center) {
+            Text("و", fontSize = 42.sp, color = Ink, fontWeight = FontWeight.Bold)
+        }
         Spacer(Modifier.height(12.dp))
-        Text("@$username",color=Color.White,fontWeight=FontWeight.Bold,fontSize=20.sp)
-        Text("ملفك الشخصي",color=Muted)
+        Text("@$username", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text("ملفك الشخصي", color = Muted)
         Spacer(Modifier.height(20.dp))
-        OutlinedTextField(value=display,onValueChange={display=it},modifier=Modifier.fillMaxWidth(),label={Text("الاسم الظاهر")},singleLine=true)
+        OutlinedTextField(value = display, onValueChange = { display = it }, modifier = Modifier.fillMaxWidth(), label = { Text("الاسم الظاهر") }, singleLine = true)
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(value=bio,onValueChange={bio=it},modifier=Modifier.fillMaxWidth(),label={Text("نبذة عنك")},minLines=3)
+        OutlinedTextField(value = bio, onValueChange = { bio = it }, modifier = Modifier.fillMaxWidth(), label = { Text("نبذة عنك") }, minLines = 3)
         Spacer(Modifier.height(14.dp))
-        Button(enabled=!saving,onClick={
-            saving=true; status=""
+        Button(enabled = !saving, onClick = {
+            saving = true
             Thread {
-                try { supabaseRest("profiles?id=eq.$userId",token,"PATCH",JSONObject().put("display_name",display.trim()).put("bio",bio.trim())); status="تم حفظ الملف الشخصي" } catch(_:Exception){status="تعذر الحفظ"}
-                saving=false
+                val result = try {
+                    supabaseRest("profiles?id=eq.$userId", token, "PATCH", JSONObject().put("display_name", display.trim()).put("bio", bio.trim()))
+                    "تم حفظ الملف الشخصي"
+                } catch (_: Exception) { "تعذر الحفظ" }
+                (context as? ComponentActivity)?.runOnUiThread { saving = false; status = result }
             }.start()
-        },modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.buttonColors(containerColor=Teal)){Text(if(saving) "جارٍ الحفظ..." else "حفظ التعديلات",color=Ink)}
-        OutlinedButton(onClick={verifyOpen=true},modifier=Modifier.fillMaxWidth().padding(top=10.dp)) { Text("طلب توثيق الحساب",color=Teal) }
-        if(status.isNotBlank()) Text(status,color=Teal,modifier=Modifier.padding(top=10.dp))
-        if(verifyOpen) AlertDialog(onDismissRequest={verifyOpen=false},title={Text("طلب توثيق مجاني")},text={Column { OutlinedTextField(value=verifyName,onValueChange={verifyName=it},label={Text("الاسم الكامل")},singleLine=true); OutlinedTextField(value=verifyReason,onValueChange={verifyReason=it},label={Text("سبب طلب التوثيق")},minLines=3) }},confirmButton={TextButton(enabled=!verifyBusy && verifyName.isNotBlank() && verifyReason.isNotBlank(),onClick={verifyBusy=true; Thread { try { supabaseRest("verification_requests",token,"POST",JSONObject().put("user_id",userId).put("full_name",verifyName.trim()).put("reason",verifyReason.trim())); (context as? ComponentActivity)?.runOnUiThread { status="تم إرسال طلب التوثيق"; verifyOpen=false; verifyBusy=false } } catch(_:Exception) { verifyBusy=false; status="تعذر إرسال الطلب" } }.start() }){Text(if(verifyBusy) "جارٍ الإرسال..." else "إرسال الطلب")},dismissButton={TextButton(onClick={verifyOpen=false}){Text("إلغاء")}})
+        }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Teal)) {
+            Text(if (saving) "جارٍ الحفظ..." else "حفظ التعديلات", color = Ink)
+        }
+        OutlinedButton(onClick = { verifyOpen = true }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+            Text("طلب توثيق الحساب", color = Teal)
+        }
+        if (status.isNotBlank()) Text(status, color = Teal, modifier = Modifier.padding(top = 10.dp))
+        if (verifyOpen) {
+            AlertDialog(
+                onDismissRequest = { verifyOpen = false },
+                title = { Text("طلب توثيق مجاني") },
+                text = {
+                    Column {
+                        OutlinedTextField(value = verifyName, onValueChange = { verifyName = it }, label = { Text("الاسم الكامل") }, singleLine = true)
+                        OutlinedTextField(value = verifyReason, onValueChange = { verifyReason = it }, label = { Text("سبب طلب التوثيق") }, minLines = 3)
+                    }
+                },
+                confirmButton = {
+                    TextButton(enabled = !verifyBusy && verifyName.isNotBlank() && verifyReason.isNotBlank(), onClick = {
+                        verifyBusy = true
+                        Thread {
+                            val result = try {
+                                supabaseRest("verification_requests", token, "POST", JSONObject().put("user_id", userId).put("full_name", verifyName.trim()).put("reason", verifyReason.trim()))
+                                "تم إرسال طلب التوثيق"
+                            } catch (_: Exception) { "تعذر إرسال الطلب" }
+                            (context as? ComponentActivity)?.runOnUiThread { status = result; verifyOpen = false; verifyBusy = false }
+                        }.start()
+                    }) { Text(if (verifyBusy) "جارٍ الإرسال..." else "إرسال الطلب") }
+                },
+                dismissButton = { TextButton(onClick = { verifyOpen = false }) { Text("إلغاء") } }
+            )
+        }
     }
 }
 @Composable
