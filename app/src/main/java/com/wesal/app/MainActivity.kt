@@ -365,7 +365,10 @@ fun ExploreScreen(token: String, userId: String) {
                 val isFollowing = followedIds.contains(targetId)
                 Card(colors=CardDefaults.cardColors(containerColor=SurfaceDark)) {
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment=Alignment.CenterVertically) {
-                        Box(Modifier.size(44.dp).background(Teal,CircleShape),contentAlignment=Alignment.Center){Text("و",color=Ink,fontWeight=FontWeight.Bold)}
+                        Box(Modifier.size(44.dp).background(Teal,CircleShape),contentAlignment=Alignment.Center){
+                            if(profile.optString("avatar_url").isNotBlank()) AsyncImage(model=profile.optString("avatar_url"),contentDescription="الصورة الشخصية",modifier=Modifier.size(44.dp))
+                            else Text("و",color=Ink,fontWeight=FontWeight.Bold)
+                        }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) { Text("@${profile.optString("username")}",color=Color.White,fontWeight=FontWeight.Bold); if(profile.optString("display_name").isNotBlank()) Text(profile.optString("display_name"),color=Muted) }
                         TextButton(onClick={
