@@ -255,36 +255,51 @@ fun ProfileScreen(token: String, userId: String, username: String) {
 fun ExploreScreen(token: String, userId: String) {
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var followedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("ابحث عن الأشخاص باستخدام اسم المستخدم") }
+    LaunchedEffect(token, userId) {
+        try {
+            val arr = org.json.JSONArray(supabaseRest("follows?select=following_id&follower_id=eq.$userId", token))
+            followedIds = (0 until arr.length()).map { arr.getJSONObject(it).optString("following_id") }.toSet()
+        } catch (_: Exception) {}
+    }
     LaunchedEffect(query) {
-        if(query.trim().length >= 2) {
-            loading=true
+        if (query.trim().length >= 2) {
+            loading = true
             try {
-                val q=java.net.URLEncoder.encode(query.trim(),"UTF-8")
-                val arr=org.json.JSONArray(supabaseRest("profiles?select=id,username,display_name,avatar_url&username=ilike.%25$q%25&limit=30",token))
-                results=(0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("id") != userId }
-                message=if(results.isEmpty()) "لم نعثر على مستخدمين" else ""
-            } catch(_:Exception) { message="تعذر البحث حالياً" }
-            loading=false
-        } else { results=emptyList(); message="اكتب حرفين على الأقل للبحث" }
+                val q = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+                val arr = org.json.JSONArray(supabaseRest("profiles?select=id,username,display_name,avatar_url&username=ilike.%25$q%25&limit=30", token))
+                results = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("id") != userId }
+                message = if (results.isEmpty()) "لم نعثر على مستخدمين" else ""
+            } catch (_: Exception) { message = "تعذر البحث حالياً" }
+            loading = false
+        } else { results = emptyList(); message = "اكتب حرفين على الأقل للبحث" }
     }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("استكشاف الأشخاص",color=Color.White,fontSize=24.sp,fontWeight=FontWeight.Bold)
+        Text("استكشاف الأشخاص", color=Color.White, fontSize=24.sp, fontWeight=FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(value=query,onValueChange={query=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("اسم المستخدم")},leadingIcon={Icon(Icons.Default.Search,null)})
-        if(loading) CircularProgressIndicator(color=Teal,modifier=Modifier.padding(16.dp))
-        if(message.isNotBlank()) Text(message,color=Muted,modifier=Modifier.padding(12.dp))
+        OutlinedTextField(value=query, onValueChange={query=it}, modifier=Modifier.fillMaxWidth(), singleLine=true, label={Text("اسم المستخدم")}, leadingIcon={Icon(Icons.Default.Search,null)})
+        if (loading) CircularProgressIndicator(color=Teal, modifier=Modifier.padding(16.dp))
+        if (message.isNotBlank()) Text(message, color=Muted, modifier=Modifier.padding(12.dp))
         LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            items(results,key={it.optString("id")}) { profile ->
+            items(results, key={it.optString("id")}) { profile ->
+                val targetId = profile.optString("id")
+                val isFollowing = followedIds.contains(targetId)
                 Card(colors=CardDefaults.cardColors(containerColor=SurfaceDark)) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment=Alignment.CenterVertically) {
                         Box(Modifier.size(44.dp).background(Teal,CircleShape),contentAlignment=Alignment.Center){Text("و",color=Ink,fontWeight=FontWeight.Bold)}
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) { Text("@${profile.optString("username")}",color=Color.White,fontWeight=FontWeight.Bold); if(profile.optString("display_name").isNotBlank()) Text(profile.optString("display_name"),color=Muted) }
                         TextButton(onClick={
-                            Thread { try { supabaseRest("follows",token,"POST",JSONObject().put("follower_id",userId).put("following_id",profile.optString("id"))) } catch(_:Exception){} }.start()
-                        }) { Text("متابعة",color=Teal) }
+                            Thread {
+                                try {
+                                    if (isFollowing) supabaseRest("follows?follower_id=eq.$userId&following_id=eq.$targetId", token, "DELETE")
+                                    else supabaseRest("follows", token, "POST", JSONObject().put("follower_id",userId).put("following_id",targetId))
+                                    (contextSafeMainThread { followedIds = if(isFollowing) followedIds-targetId else followedIds+targetId })
+                                } catch (_: Exception) {}
+                            }.start()
+                        }) { Text(if(isFollowing) "إلغاء المتابعة" else "متابعة",color=Teal) }
                     }
                 }
             }
