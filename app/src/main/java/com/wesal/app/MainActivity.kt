@@ -159,7 +159,8 @@ fun WesalApp(context: Context) {
                         1 -> ExploreScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         2 -> CreatePostScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         3 -> CenterPage("النشاط", "سيتم تفعيل الإشعارات في المرحلة التالية")
-                        5 -> ProfileScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "", username)\n                        else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
+                        5 -> ProfileScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "", username)
+                        else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
                     }
                     Spacer(Modifier.weight(1f))
                     NavigationBar(containerColor = SurfaceDark) {
