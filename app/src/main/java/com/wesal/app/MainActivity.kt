@@ -150,9 +150,9 @@ fun WesalApp(context: Context) {
                         IconButton(onClick = { prefs.edit().clear().apply(); signedIn = false; password = "" }) { Icon(Icons.Default.Logout, null, tint = Color.White) }
                     }
                     when (selected) {
-                        0 -> FeedScreen()
+                        0 -> FeedScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         1 -> CenterPage("استكشاف", "سيتم ربط البحث عن المستخدمين في المرحلة التالية")
-                        2 -> CenterPage("إنشاء منشور", "سيتم تفعيل رفع الصور والمنشورات في المرحلة التالية")
+                        2 -> CreatePostScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         3 -> CenterPage("النشاط", "سيتم تفعيل الإشعارات في المرحلة التالية")
                         else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
                     }
@@ -218,4 +218,91 @@ fun CenterPage(title: String, subtitle: String) {
         Spacer(Modifier.height(8.dp))
         Text(subtitle, color = Muted)
     }
+}private fun supabaseRest(path: String, token: String, method: String = "GET", body: JSONObject? = null): String {
+    val connection = (URL("$SUPABASE_URL/rest/v1/$path").openConnection() as HttpURLConnection)
+    connection.requestMethod = method
+    connection.connectTimeout = 15000
+    connection.readTimeout = 20000
+    connection.setRequestProperty("apikey", SUPABASE_KEY)
+    connection.setRequestProperty("Authorization", "Bearer $token")
+    connection.setRequestProperty("Content-Type", "application/json")
+    if (method == "POST" || method == "PATCH") connection.setRequestProperty("Prefer", "return=representation")
+    if (body != null) {
+        connection.doOutput = true
+        connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+    }
+    val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+    val result = stream.bufferedReader().use { it.readText() }
+    connection.disconnect()
+    return result
 }
+
+@Composable
+fun FeedScreen(token: String, userId: String) {
+    var posts by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf("") }
+    LaunchedEffect(token) {
+        try {
+            val result = supabaseRest("posts?select=id,user_id,caption,media_url,created_at&order=created_at.desc&limit=50", token)
+            val arr = org.json.JSONArray(result)
+            posts = (0 until arr.length()).map { arr.getJSONObject(it) }
+        } catch (e: Exception) { error = "تعذر تحميل المنشورات"; }
+        loading = false
+    }
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Text("مرحباً بك 👋", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("آخر منشورات مجتمع وصال", color = Muted)
+        }
+        if (loading) item { CircularProgressIndicator(color = Teal) }
+        if (error.isNotBlank()) item { Text(error, color = Color(0xFFFF8A80)) }
+        if (!loading && posts.isEmpty() && error.isBlank()) item { Text("لا توجد منشورات بعد. كن أول من يشارك!", color = Muted) }
+        items(posts, key = { it.optString("id") }) { post ->
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("@"+post.optString("user_id").take(8), color = Teal, fontWeight = FontWeight.Bold)
+                    if (post.optString("caption").isNotBlank()) Text(post.optString("caption"), color = Color.White, modifier = Modifier.padding(top=10.dp))
+                    if (post.optString("media_url").isNotBlank()) Text("صورة مرفقة: "+post.optString("media_url"), color = Muted, fontSize = 12.sp)
+                    Row(Modifier.fillMaxWidth().padding(top=12.dp), horizontalArrangement = Arrangement.End) {
+                        Text("وصال", color = Muted, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CreatePostScreen(token: String, userId: String) {
+    var caption by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(22.dp), verticalArrangement = Arrangement.Center) {
+        Text("إنشاء منشور", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Text("شارك أفكارك مع مجتمع وصال", color = Muted)
+        Spacer(Modifier.height(20.dp))
+        Box(Modifier.fillMaxWidth().background(SurfaceDark, RoundedCornerShape(16.dp)).padding(16.dp)) {
+            BasicTextField(caption, { caption = it }, modifier = Modifier.fillMaxWidth().heightIn(min=130.dp), textStyle = androidx.compose.ui.text.TextStyle(color=Color.White,fontSize=16.sp), decorationBox = { inner -> if(caption.isEmpty()) Text("ماذا تريد أن تشارك؟", color=Muted); inner() })
+        }
+        Spacer(Modifier.height(14.dp))
+        Button(onClick = {
+            if (caption.trim().isEmpty()) status = "اكتب نص المنشور أولاً"
+            else {
+                busy = true; status = ""
+                Thread {
+                    try {
+                        val body = JSONObject().put("user_id", userId).put("caption", caption.trim()).put("media_type", "text")
+                        supabaseRest("posts", token, "POST", body)
+                        (androidx.compose.ui.platform.LocalContext.current as? ComponentActivity)?.runOnUiThread { }
+                    } catch (_: Exception) { }
+                }.start()
+            }
+        }, enabled = !busy, modifier=Modifier.fillMaxWidth().height(50.dp), colors=ButtonDefaults.buttonColors(containerColor=Teal)) {
+            Text(if(busy) "جارٍ النشر..." else "نشر", color=Ink,fontWeight=FontWeight.Bold)
+        }
+        if(status.isNotBlank()) Text(status, color=Teal, modifier=Modifier.padding(top=12.dp))
+    }
+}
+
+
