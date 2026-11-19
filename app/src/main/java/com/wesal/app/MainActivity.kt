@@ -219,6 +219,7 @@ fun FeedScreen() {
 
 @Composable
 fun ProfileScreen(token: String, userId: String, username: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var display by remember { mutableStateOf(username) }
     var bio by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
