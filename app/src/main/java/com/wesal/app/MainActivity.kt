@@ -156,7 +156,7 @@ fun WesalApp(context: Context) {
                     }
                     when (selected) {
                         0 -> FeedScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
-                        1 -> CenterPage("استكشاف", "سيتم ربط البحث عن المستخدمين في المرحلة التالية")
+                        1 -> ExploreScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         2 -> CreatePostScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         3 -> CenterPage("النشاط", "سيتم تفعيل الإشعارات في المرحلة التالية")
                         else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
@@ -216,6 +216,46 @@ fun FeedScreen() {
     }
 }
 
+@Composable
+fun ExploreScreen(token: String, userId: String) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("ابحث عن الأشخاص باستخدام اسم المستخدم") }
+    LaunchedEffect(query) {
+        if(query.trim().length >= 2) {
+            loading=true
+            try {
+                val q=java.net.URLEncoder.encode(query.trim(),"UTF-8")
+                val arr=org.json.JSONArray(supabaseRest("profiles?select=id,username,display_name,avatar_url&username=ilike.%25$q%25&limit=30",token))
+                results=(0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("id") != userId }
+                message=if(results.isEmpty()) "لم نعثر على مستخدمين" else ""
+            } catch(_:Exception) { message="تعذر البحث حالياً" }
+            loading=false
+        } else { results=emptyList(); message="اكتب حرفين على الأقل للبحث" }
+    }
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("استكشاف الأشخاص",color=Color.White,fontSize=24.sp,fontWeight=FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(value=query,onValueChange={query=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("اسم المستخدم")},leadingIcon={Icon(Icons.Default.Search,null)})
+        if(loading) CircularProgressIndicator(color=Teal,modifier=Modifier.padding(16.dp))
+        if(message.isNotBlank()) Text(message,color=Muted,modifier=Modifier.padding(12.dp))
+        LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            items(results,key={it.optString("id")}) { profile ->
+                Card(colors=CardDefaults.cardColors(containerColor=SurfaceDark)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+                        Box(Modifier.size(44.dp).background(Teal,CircleShape),contentAlignment=Alignment.Center){Text("و",color=Ink,fontWeight=FontWeight.Bold)}
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) { Text("@${profile.optString("username")}",color=Color.White,fontWeight=FontWeight.Bold); if(profile.optString("display_name").isNotBlank()) Text(profile.optString("display_name"),color=Muted) }
+                        TextButton(onClick={
+                            Thread { try { supabaseRest("follows",token,"POST",JSONObject().put("follower_id",userId).put("following_id",profile.optString("id"))) } catch(_:Exception){} }.start()
+                        }) { Text("متابعة",color=Teal) }
+                    }
+                }
+            }
+        }
+    }
+}
 @Composable
 fun CenterPage(title: String, subtitle: String) {
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
