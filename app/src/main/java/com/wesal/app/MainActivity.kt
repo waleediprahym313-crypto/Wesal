@@ -270,6 +270,32 @@ private fun supabaseRest(path: String, token: String, method: String = "GET", bo
 }
 
 @Composable
+fun PostActions(postId: String, userId: String, token: String) {
+    var likes by remember { mutableIntStateOf(0) }
+    var liked by remember { mutableStateOf(false) }
+    var comments by remember { mutableIntStateOf(0) }
+    var show by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf("") }
+    LaunchedEffect(postId) {
+        try {
+            val a = org.json.JSONArray(supabaseRest("likes?select=user_id&post_id=eq.$postId", token))
+            likes = a.length(); liked = (0 until a.length()).any { a.getJSONObject(it).optString("user_id") == userId }
+            comments = org.json.JSONArray(supabaseRest("comments?select=id&post_id=eq.$postId", token)).length()
+        } catch (_: Exception) {}
+    }
+    Row {
+        TextButton(onClick={
+            Thread {
+                try { if(liked) supabaseRest("likes?post_id=eq.$postId&user_id=eq.$userId",token,"DELETE") else supabaseRest("likes",token,"POST",JSONObject().put("post_id",postId).put("user_id",userId)) } catch (_:Exception) {}
+            }.start(); liked=!liked; likes += if(liked) 1 else -1
+        }) { Icon(if(liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,null,tint=if(liked) Color.Red else Muted); Text(" $likes",color=Muted) }
+        TextButton(onClick={show=true}) { Icon(Icons.Default.Comment,null,tint=Muted); Text(" $comments",color=Muted) }
+    }
+    if(show) AlertDialog(onDismissRequest={show=false},title={Text("إضافة تعليق")},text={OutlinedTextField(value=text,onValueChange={text=it},label={Text("تعليقك")})},confirmButton={TextButton(onClick={
+        val body=text.trim(); if(body.isNotEmpty()) Thread { try { supabaseRest("comments",token,"POST",JSONObject().put("post_id",postId).put("user_id",userId).put("body",body)); comments++ } catch(_:Exception){} }.start(); text=""; show=false
+    }){Text("إرسال")}},dismissButton={TextButton(onClick={show=false}){Text("إلغاء")}})
+}
+@Composable
 fun FeedScreen(token: String, userId: String) {
     var posts by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -296,9 +322,8 @@ fun FeedScreen(token: String, userId: String) {
                     Text("@"+post.optString("user_id").take(8), color = Teal, fontWeight = FontWeight.Bold)
                     if (post.optString("caption").isNotBlank()) Text(post.optString("caption"), color = Color.White, modifier = Modifier.padding(top=10.dp))
                     if (post.optString("media_url").isNotBlank()) AsyncImage(model = post.optString("media_url"), contentDescription = "صورة المنشور", modifier = Modifier.fillMaxWidth().height(240.dp))
-                    Row(Modifier.fillMaxWidth().padding(top=12.dp), horizontalArrangement = Arrangement.End) {
-                        Text("وصال", color = Muted, fontSize = 11.sp)
-                    }
+                    PostActions(post.optString("id"), userId, token)
+                    Row(Modifier.fillMaxWidth().padding(top=8.dp), horizontalArrangement = Arrangement.End) { Text("وصال", color = Muted, fontSize = 11.sp) }
                 }
             }
         }
