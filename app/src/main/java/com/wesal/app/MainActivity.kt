@@ -296,6 +296,7 @@ fun ProfileScreen(token: String, userId: String, username: String) {
 }
 @Composable
 fun ExploreScreen(token: String, userId: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var followedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
