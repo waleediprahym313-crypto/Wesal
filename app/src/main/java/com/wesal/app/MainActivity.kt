@@ -2,8 +2,11 @@ package com.wesal.app
 
 import android.content.Context
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 
 private val Ink = Color(0xFF101827)
 private val Teal = Color(0xFF20C6B7)
@@ -218,7 +222,34 @@ fun CenterPage(title: String, subtitle: String) {
         Spacer(Modifier.height(8.dp))
         Text(subtitle, color = Muted)
     }
-}private fun supabaseRest(path: String, token: String, method: String = "GET", body: JSONObject? = null): String {
+}
+private fun uploadMedia(context: Context, token: String, userId: String, uri: Uri): String {
+    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: throw IllegalStateException("تعذر قراءة الصورة")
+    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+    val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
+    val filename = "${UUID.randomUUID()}.$ext"
+    val path = "$userId/$filename"
+    val connection = (URL("$SUPABASE_URL/storage/v1/object/wesal-media/$path").openConnection() as HttpURLConnection)
+    connection.requestMethod = "POST"
+    connection.connectTimeout = 20000
+    connection.readTimeout = 30000
+    connection.doOutput = true
+    connection.setRequestProperty("apikey", SUPABASE_KEY)
+    connection.setRequestProperty("Authorization", "Bearer $token")
+    connection.setRequestProperty("Content-Type", mime)
+    connection.setRequestProperty("x-upsert", "false")
+    connection.outputStream.use { it.write(bytes) }
+    if (connection.responseCode !in 200..299) {
+        val err = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Upload failed"
+        connection.disconnect()
+        throw IllegalStateException(err)
+    }
+    connection.disconnect()
+    return "$SUPABASE_URL/storage/v1/object/public/wesal-media/$path"
+}
+
+private fun supabaseRest(path: String, token: String, method: String = "GET", body: JSONObject? = null): String {
     val connection = (URL("$SUPABASE_URL/rest/v1/$path").openConnection() as HttpURLConnection)
     connection.requestMethod = method
     connection.connectTimeout = 15000
@@ -277,27 +308,44 @@ fun FeedScreen(token: String, userId: String) {
 fun CreatePostScreen(token: String, userId: String) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var caption by remember { mutableStateOf("") }
+    var selectedImage by remember { mutableStateOf<Uri?>(null) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        selectedImage = uri
+        status = ""
+    }
     Column(Modifier.fillMaxSize().padding(22.dp), verticalArrangement = Arrangement.Center) {
         Text("إنشاء منشور", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        Text("شارك أفكارك مع مجتمع وصال", color = Muted)
+        Text("شارك أفكارك وصورك مع مجتمع وصال", color = Muted)
         Spacer(Modifier.height(20.dp))
         Box(Modifier.fillMaxWidth().background(SurfaceDark, RoundedCornerShape(16.dp)).padding(16.dp)) {
-            BasicTextField(caption, { caption = it }, modifier = Modifier.fillMaxWidth().heightIn(min=130.dp), textStyle = androidx.compose.ui.text.TextStyle(color=Color.White,fontSize=16.sp), decorationBox = { inner -> if(caption.isEmpty()) Text("ماذا تريد أن تشارك؟", color=Muted); inner() })
+            BasicTextField(caption, { caption = it }, modifier = Modifier.fillMaxWidth().heightIn(min=120.dp), textStyle = androidx.compose.ui.text.TextStyle(color=Color.White,fontSize=16.sp), decorationBox = { inner -> if(caption.isEmpty()) Text("ماذا تريد أن تشارك؟", color=Muted); inner() })
         }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = { imagePicker.launch("image/*") }, modifier=Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Image, null, tint=Teal)
+            Spacer(Modifier.width(8.dp))
+            Text(if(selectedImage == null) "إضافة صورة" else "تغيير الصورة", color=Teal)
+        }
+        if (selectedImage != null) Text("تم اختيار صورة لإرفاقها", color=Teal, modifier=Modifier.padding(top=8.dp))
         Spacer(Modifier.height(14.dp))
         Button(onClick = {
-            if (caption.trim().isEmpty()) status = "اكتب نص المنشور أولاً"
+            if (caption.trim().isEmpty() && selectedImage == null) status = "اكتب نصاً أو اختر صورة"
             else {
                 busy = true; status = ""
+                val imageUri = selectedImage
+                val text = caption.trim()
                 Thread {
                     try {
-                        val body = JSONObject().put("user_id", userId).put("caption", caption.trim()).put("media_type", "text")
+                        val mediaUrl = if (imageUri != null) uploadMedia(context, token, userId, imageUri) else ""
+                        val body = JSONObject().put("user_id", userId).put("caption", text)
+                            .put("media_type", if(mediaUrl.isNotBlank()) "image" else "text")
+                            .put("media_url", mediaUrl)
                         supabaseRest("posts", token, "POST", body)
-                        (context as? ComponentActivity)?.runOnUiThread { busy = false; status = "تم نشر منشورك بنجاح"; caption = "" }
+                        (context as? ComponentActivity)?.runOnUiThread { busy = false; status = "تم نشر منشورك بنجاح"; caption = ""; selectedImage = null }
                     } catch (e: Exception) {
-                        (context as? ComponentActivity)?.runOnUiThread { busy = false; status = "تعذر النشر، حاول مرة أخرى" }
+                        (context as? ComponentActivity)?.runOnUiThread { busy = false; status = "تعذر النشر: تحقق من الاتصال وحاول مجدداً" }
                     }
                 }.start()
             }
@@ -307,5 +355,4 @@ fun CreatePostScreen(token: String, userId: String) {
         if(status.isNotBlank()) Text(status, color=Teal, modifier=Modifier.padding(top=12.dp))
     }
 }
-
 
