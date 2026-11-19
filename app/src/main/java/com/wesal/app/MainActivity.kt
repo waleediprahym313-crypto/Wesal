@@ -275,6 +275,7 @@ fun FeedScreen(token: String, userId: String) {
 
 @Composable
 fun CreatePostScreen(token: String, userId: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var caption by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
@@ -294,8 +295,10 @@ fun CreatePostScreen(token: String, userId: String) {
                     try {
                         val body = JSONObject().put("user_id", userId).put("caption", caption.trim()).put("media_type", "text")
                         supabaseRest("posts", token, "POST", body)
-                        (androidx.compose.ui.platform.LocalContext.current as? ComponentActivity)?.runOnUiThread { }
-                    } catch (_: Exception) { }
+                        (context as? ComponentActivity)?.runOnUiThread { busy = false; status = "تم نشر منشورك بنجاح"; caption = "" }
+                    } catch (e: Exception) {
+                        (context as? ComponentActivity)?.runOnUiThread { busy = false; status = "تعذر النشر، حاول مرة أخرى" }
+                    }
                 }.start()
             }
         }, enabled = !busy, modifier=Modifier.fillMaxWidth().height(50.dp), colors=ButtonDefaults.buttonColors(containerColor=Teal)) {
