@@ -159,12 +159,12 @@ fun WesalApp(context: Context) {
                         1 -> ExploreScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         2 -> CreatePostScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "")
                         3 -> CenterPage("النشاط", "سيتم تفعيل الإشعارات في المرحلة التالية")
-                        else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
+                        5 -> ProfileScreen(prefs.getString("access_token", "") ?: "", prefs.getString("user_id", "") ?: "", username)\n                        else -> CenterPage("الرسائل", "سيتم تفعيل المحادثات في المرحلة التالية")
                     }
                     Spacer(Modifier.weight(1f))
                     NavigationBar(containerColor = SurfaceDark) {
-                        val labels = listOf("الرئيسية", "استكشاف", "إضافة", "النشاط", "الرسائل")
-                        val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.AddCircle, Icons.Default.Notifications, Icons.Default.Chat)
+                        val labels = listOf("الرئيسية", "استكشاف", "إضافة", "النشاط", "الرسائل", "حسابي")
+                        val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.AddCircle, Icons.Default.Notifications, Icons.Default.Chat, Icons.Default.Person)
                         labels.forEachIndexed { index, label ->
                             NavigationBarItem(selected = selected == index, onClick = { selected = index }, icon = { Icon(icons[index], null) }, label = { Text(label, fontSize = 10.sp) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Teal, selectedTextColor = Teal, indicatorColor = Ink, unselectedIconColor = Muted, unselectedTextColor = Muted))
                         }
@@ -216,6 +216,40 @@ fun FeedScreen() {
     }
 }
 
+@Composable
+fun ProfileScreen(token: String, userId: String, username: String) {
+    var display by remember { mutableStateOf(username) }
+    var bio by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(true) }
+    var saving by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    LaunchedEffect(userId) {
+        try {
+            val arr=org.json.JSONArray(supabaseRest("profiles?select=display_name,bio&id=eq.$userId",token))
+            if(arr.length()>0) { display=arr.getJSONObject(0).optString("display_name",username); bio=arr.getJSONObject(0).optString("bio","") }
+        } catch(_:Exception){}
+        loading=false
+    }
+    Column(Modifier.fillMaxSize().padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+        Box(Modifier.size(90.dp).background(Teal,CircleShape),contentAlignment=Alignment.Center){Text("و",fontSize=42.sp,color=Ink,fontWeight=FontWeight.Bold)}
+        Spacer(Modifier.height(12.dp))
+        Text("@$username",color=Color.White,fontWeight=FontWeight.Bold,fontSize=20.sp)
+        Text("ملفك الشخصي",color=Muted)
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(value=display,onValueChange={display=it},modifier=Modifier.fillMaxWidth(),label={Text("الاسم الظاهر")},singleLine=true)
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(value=bio,onValueChange={bio=it},modifier=Modifier.fillMaxWidth(),label={Text("نبذة عنك")},minLines=3)
+        Spacer(Modifier.height(14.dp))
+        Button(enabled=!saving,onClick={
+            saving=true; status=""
+            Thread {
+                try { supabaseRest("profiles?id=eq.$userId",token,"PATCH",JSONObject().put("display_name",display.trim()).put("bio",bio.trim())); status="تم حفظ الملف الشخصي" } catch(_:Exception){status="تعذر الحفظ"}
+                saving=false
+            }.start()
+        },modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.buttonColors(containerColor=Teal)){Text(if(saving) "جارٍ الحفظ..." else "حفظ التعديلات",color=Ink)}
+        if(status.isNotBlank()) Text(status,color=Teal,modifier=Modifier.padding(top=10.dp))
+    }
+}
 @Composable
 fun ExploreScreen(token: String, userId: String) {
     var query by remember { mutableStateOf("") }
