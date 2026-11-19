@@ -224,6 +224,10 @@ fun ProfileScreen(token: String, userId: String, username: String) {
     var loading by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
+    var verifyOpen by remember { mutableStateOf(false) }
+    var verifyName by remember { mutableStateOf("") }
+    var verifyReason by remember { mutableStateOf("") }
+    var verifyBusy by remember { mutableStateOf(false) }
     LaunchedEffect(userId) {
         try {
             val arr=org.json.JSONArray(supabaseRest("profiles?select=display_name,bio&id=eq.$userId",token))
@@ -248,7 +252,9 @@ fun ProfileScreen(token: String, userId: String, username: String) {
                 saving=false
             }.start()
         },modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.buttonColors(containerColor=Teal)){Text(if(saving) "جارٍ الحفظ..." else "حفظ التعديلات",color=Ink)}
+        OutlinedButton(onClick={verifyOpen=true},modifier=Modifier.fillMaxWidth().padding(top=10.dp)) { Text("طلب توثيق الحساب",color=Teal) }
         if(status.isNotBlank()) Text(status,color=Teal,modifier=Modifier.padding(top=10.dp))
+        if(verifyOpen) AlertDialog(onDismissRequest={verifyOpen=false},title={Text("طلب توثيق مجاني")},text={Column { OutlinedTextField(value=verifyName,onValueChange={verifyName=it},label={Text("الاسم الكامل")},singleLine=true); OutlinedTextField(value=verifyReason,onValueChange={verifyReason=it},label={Text("سبب طلب التوثيق")},minLines=3) }},confirmButton={TextButton(enabled=!verifyBusy && verifyName.isNotBlank() && verifyReason.isNotBlank(),onClick={verifyBusy=true; Thread { try { supabaseRest("verification_requests",token,"POST",JSONObject().put("user_id",userId).put("full_name",verifyName.trim()).put("reason",verifyReason.trim())); (context as? ComponentActivity)?.runOnUiThread { status="تم إرسال طلب التوثيق"; verifyOpen=false; verifyBusy=false } } catch(_:Exception) { verifyBusy=false; status="تعذر إرسال الطلب" } }.start() }){Text(if(verifyBusy) "جارٍ الإرسال..." else "إرسال الطلب")},dismissButton={TextButton(onClick={verifyOpen=false}){Text("إلغاء")}})
     }
 }
 @Composable
