@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -294,7 +295,7 @@ fun FeedScreen(token: String, userId: String) {
                 Column(Modifier.padding(16.dp)) {
                     Text("@"+post.optString("user_id").take(8), color = Teal, fontWeight = FontWeight.Bold)
                     if (post.optString("caption").isNotBlank()) Text(post.optString("caption"), color = Color.White, modifier = Modifier.padding(top=10.dp))
-                    if (post.optString("media_url").isNotBlank()) Text("صورة مرفقة: "+post.optString("media_url"), color = Muted, fontSize = 12.sp)
+                    if (post.optString("media_url").isNotBlank()) AsyncImage(model = post.optString("media_url"), contentDescription = "صورة المنشور", modifier = Modifier.fillMaxWidth().height(240.dp))
                     Row(Modifier.fillMaxWidth().padding(top=12.dp), horizontalArrangement = Arrangement.End) {
                         Text("وصال", color = Muted, fontSize = 11.sp)
                     }
